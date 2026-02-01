@@ -11,7 +11,7 @@ from playwright.sync_api import sync_playwright
 
 app = Flask(__name__)
 
-@app.route('/', methods=['POST'])
+@app.route('/run-test', methods=['POST'])
 def run_test():
     try:
         # 1. Get Data
