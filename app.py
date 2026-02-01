@@ -8,6 +8,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 # Import Playwright
 from playwright.sync_api import sync_playwright
+import base64
 
 app = Flask(__name__)
 
@@ -59,13 +60,19 @@ def run_playwright(url):
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.goto(url)
+
+        # Take a screenshot and save it as a Base64 string
+        screenshot_bytes = page.screenshot(full_page=True)
+        screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
+        
         title = page.title()
         browser.close()
 
         return jsonify({
             "status": "PASSED",
             "tool": "Playwright",
-            "message": f"Playwright visited {url}. Title: {title}"
+            "message": f"Playwright visited {url}. Title: {title}",
+            "screenshot": f"data:image/png;base64,{screenshot_base64}" # This is your "photo"
         })
 
 if __name__ == '__main__':
