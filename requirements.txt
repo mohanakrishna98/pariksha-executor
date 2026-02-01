@@ -1,0 +1,5 @@
+flask
+selenium
+playwright
+webdriver-manager
+gunicorn
