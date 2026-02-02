@@ -56,35 +56,53 @@ def run_selenium(url):
         driver.quit()
 
 def run_playwright(url):
+    # 'data' is the full JSON from Pariksha
+    steps = data.get('steps', [])
+    target_url = steps[0].get('url') if steps else "https://www.google.com"
+    
     with sync_playwright() as p:
-        # Headless must be True for Render
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.set_viewport_size({"width": 1280, "height": 720})
         
-        # 1. Navigate
-        page.goto(url, wait_until="networkidle")
+        logs = []
         
-        # 2. Example: Finding a search bar to highlight
-        # In a real test, 'selector' would come from your JSON steps
-        selector = "input[name='q']" 
-        if page.is_visible(selector):
-            # THE RED BOX: Inject CSS to highlight the element
-            page.eval_on_selector(selector, "el => el.style.border = '5px solid red'")
-        
-        # 3. Capture Detailed Logs & Screenshot
-        screenshot_bytes = page.screenshot(full_page=False) # False is better for highlighting
-        screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
-        
-        execution_log = f"Step 1: Navigated to {url}. Step 2: Found search bar and highlighted in red."
-        
+        # --- THE EXECUTION LOOP ---
+        for i, step in enumerate(steps):
+            action = step.get('action')
+            desc = step.get('target_description', 'element')
+            
+            try:
+                if action == 'navigate':
+                    page.goto(step.get('url'), wait_until="networkidle")
+                    logs.append(f"✅ Step {i+1}: Navigated to {step.get('url')}")
+                
+                elif action == 'type':
+                    # This uses Playwright's 'Locator' to find things by text/description
+                    page.get_by_placeholder(desc).fill(step.get('data'))
+                    logs.append(f"✅ Step {i+1}: Typed '{step.get('data')}' into {desc}")
+                
+                elif action == 'click':
+                    page.get_by_role("button", name=desc, exact=False).click()
+                    logs.append(f"✅ Step {i+1}: Clicked {desc}")
+
+                # Take a 'Final' screenshot after all steps are done
+                if i == len(steps) - 1:
+                    screenshot_bytes = page.screenshot(full_page=False)
+                    screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
+
+            except Exception as e:
+                logs.append(f"❌ Step {i+1} FAILED: {str(e)}")
+                break # Stop if a step fails
+
         browser.close()
         
         return jsonify({
-            "status": "PASSED",
-            "actual_results": execution_log, # This fixes the "No logs" error
-            "screenshot": f"data:image/png;base64,{screenshot_base64}"
+            "status": "PASSED" if "❌" not in "".join(logs) else "FAILED",
+            "actual_results": "\n".join(logs),
+            "screenshot": f"data:image/png;base64,{screenshot_base64}" if 'screenshot_base64' in locals() else None
         })
+        
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
