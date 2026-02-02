@@ -57,22 +57,29 @@ def run_selenium(url):
 
 def run_playwright(url):
     with sync_playwright() as p:
+        # Headless must be True for Render
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
-        page.goto(url)
-
-        # Take a screenshot and save it as a Base64 string
+        
+        # Set a standard desktop screen size
+        page.set_viewport_size({"width": 1280, "height": 720})
+        
+        # Visit the site
+        page.goto(url, wait_until="networkidle")
+        
+        # 1. CAPTURE THE SCREENSHOT
+        # We convert the image to a Base64 string so it can travel via JSON
         screenshot_bytes = page.screenshot(full_page=True)
         screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
         
         title = page.title()
         browser.close()
-
+        
         return jsonify({
             "status": "PASSED",
-            "tool": "Playwright",
-            "message": f"Playwright visited {url}. Title: {title}",
-            "screenshot": f"data:image/png;base64,{screenshot_base64}" # This is your "photo"
+            "message": f"Pariksha successfully visited {url}",
+            "page_title": title,
+            "screenshot": f"data:image/png;base64,{screenshot_base64}"
         })
 
 if __name__ == '__main__':
