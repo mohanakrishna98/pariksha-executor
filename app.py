@@ -102,7 +102,7 @@ def run_playwright(data):
         return jsonify({
             "status": "PASSED" if "❌" not in "".join(logs) else "FAILED",
             "actual_results": "\n".join(logs),
-            "screenshot": f"data:image/png;base64,{screenshot_base64}" if screenshot_base64 else None
+            "screenshotBase64": screenshot_base64 if screenshot_base64 else None
         })
 
 if __name__ == '__main__':
