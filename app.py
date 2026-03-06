@@ -15,16 +15,21 @@ def run_test():
         if not data:
             return jsonify({"status": "ERROR", "message": "No JSON data received"}), 400
 
+        # STRATEGIC ADDITION: Immediate Logging for visibility in Render Dashboard
+        print(f"DEBUG: Received request. Payload: {data}")
+
         tool = data.get('executor', 'playwright').lower()
 
         if tool == 'selenium':
-            steps = data.get('steps', [])
+            # Flexible check for steps location
+            steps = data.get('steps') or data.get('testCase', {}).get('steps', [])
             target_url = steps[0].get('url') if steps else "https://www.google.com"
             return run_selenium(target_url)
         else:
             return run_playwright(data)
 
     except Exception as e:
+        print(f"DEBUG ERROR: {str(e)}")
         return jsonify({"status": "ERROR", "message": str(e)}), 500
 
 def run_selenium(url):
@@ -43,14 +48,19 @@ def run_selenium(url):
         return jsonify({
             "status": "PASSED",
             "tool": "Selenium",
-            "actualResults": f"Selenium visited {url}. Title: {title}" # CHANGED: actual_results -> actualResults
+            "actualResults": f"Selenium visited {url}. Title: {title}" 
         })
     finally:
         driver.quit()
 
 def run_playwright(data):
-    steps = data.get('steps', [])
+    # STRATEGIC ADDITION: Flexible Payload Handling
+    # This checks both 'steps' and 'testCase.steps' to ensure connection
+    steps = data.get('steps') or data.get('testCase', {}).get('steps', [])
     
+    if not steps:
+         return jsonify({"status": "FAILED", "actualResults": "No steps found in the payload."})
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
@@ -67,7 +77,8 @@ def run_playwright(data):
             
             try:
                 if action == 'navigate':
-                    page.goto(step_url, wait_until="networkidle")
+                    # Use a timeout to prevent the 'SIGTERM' crash
+                    page.goto(step_url, wait_until="networkidle", timeout=30000)
                     logs.append(f"✅ Step {i+1}: Navigated to {step_url}")
                 
                 elif action == 'type':
@@ -88,6 +99,7 @@ def run_playwright(data):
                     selector.click()
                     logs.append(f"✅ Step {i+1}: Clicked '{desc}'")
 
+                # Capture final state screenshot
                 if i == len(steps) - 1:
                     screenshot_bytes = page.screenshot(full_page=False)
                     screenshot_raw = base64.b64encode(screenshot_bytes).decode('utf-8')
@@ -102,9 +114,10 @@ def run_playwright(data):
         
         return jsonify({
             "status": "PASSED" if "❌" not in "".join(logs) else "FAILED",
-            "actualResults": "\n".join(logs), # CHANGED: actual_results -> actualResults
+            "actualResults": "\n".join(logs), 
             "screenshotBase64": screenshot_raw
         })
 
 if __name__ == '__main__':
+    # Listen on port 10000 for Render compatibility
     app.run(host='0.0.0.0', port=10000)
