@@ -8,6 +8,36 @@ import base64
 
 app = Flask(__name__)
 
+# HYBRID LOCATOR STRATEGY: Combines Option A (Precision) and Option B (Self-Healing)
+def find_element(page, selector, desc):
+    """
+    Attempts to find an element using multiple strategies to increase test resilience.
+    """
+    # Strategy 1: Attempt the direct CSS selector (Option A)
+    if selector:
+        loc = page.locator(selector)
+        if loc.count() > 0:
+            return loc
+
+    # Strategy 2: Attempt to find by Test ID or ARIA labels (Option B)
+    loc = page.locator(f"[data-testid='{desc}']").or_(
+          page.get_by_placeholder(desc, exact=False)
+    ).or_(
+          page.get_by_label(desc, exact=False)
+    )
+    if loc.count() > 0:
+        return loc
+
+    # Strategy 3: Semantic Roles (Button/Link) fallback
+    loc = page.get_by_role("button", name=desc, exact=False).or_(
+          page.get_by_role("link", name=desc, exact=False)
+    )
+    if loc.count() > 0:
+        return loc
+
+    # Strategy 4: Final Fuzzy Text Match
+    return page.get_by_text(desc, exact=False)
+
 @app.route('/run-test', methods=['POST'])
 def run_test():
     try:
@@ -15,13 +45,11 @@ def run_test():
         if not data:
             return jsonify({"status": "ERROR", "message": "No JSON data received"}), 400
 
-        # STRATEGIC ADDITION: Immediate Logging for visibility in Render Dashboard
         print(f"DEBUG: Received request. Payload: {data}")
 
         tool = data.get('executor', 'playwright').lower()
 
         if tool == 'selenium':
-            # Flexible check for steps location
             steps = data.get('steps') or data.get('testCase', {}).get('steps', [])
             target_url = steps[0].get('url') if steps else "https://www.google.com"
             return run_selenium(target_url)
@@ -54,14 +82,13 @@ def run_selenium(url):
         driver.quit()
 
 def run_playwright(data):
-    # STRATEGIC ADDITION: Flexible Payload Handling
-    # This checks both 'steps' and 'testCase.steps' to ensure connection
     steps = data.get('steps') or data.get('testCase', {}).get('steps', [])
     
     if not steps:
          return jsonify({"status": "FAILED", "actualResults": "No steps found in the payload."})
 
     with sync_playwright() as p:
+        # Launching the headless engine on Render
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.set_viewport_size({"width": 1280, "height": 720})
@@ -71,33 +98,33 @@ def run_playwright(data):
         
         for i, step in enumerate(steps):
             action = step.get('action')
-            desc = step.get('target_description', 'element')
+            desc = step.get('target_description', step.get('value', 'element'))
             step_url = step.get('url')
-            step_data = step.get('data', '')
+            step_data = step.get('data', step.get('value', ''))
+            # Priority on provided CSS selector
+            provided_selector = step.get('selector') 
             
             try:
                 if action == 'navigate':
-                    # Use a timeout to prevent the 'SIGTERM' crash
                     page.goto(step_url, wait_until="networkidle", timeout=30000)
                     logs.append(f"✅ Step {i+1}: Navigated to {step_url}")
                 
-                elif action == 'type':
-                    selector = page.locator(f"[data-testid='{desc}']").or_(
-                        page.get_by_placeholder(desc, exact=False)
-                    ).or_(
-                        page.get_by_label(desc, exact=False)
-                    )
-                    selector.fill(step_data)
-                    logs.append(f"✅ Step {i+1}: Typed into '{desc}'")
+                elif action in ['type', 'fill']:
+                    # Use the Hybrid Strategy to find the input
+                    target = find_element(page, provided_selector, desc)
+                    target.fill(step_data)
+                    logs.append(f"✅ Step {i+1}: Typed '{step_data}' into '{desc}'")
                 
                 elif action == 'click':
-                    selector = page.locator(f"[data-testid='{desc}']").or_(
-                        page.get_by_role("button", name=desc, exact=False)
-                    ).or_(
-                        page.get_by_text(desc, exact=False)
-                    )
-                    selector.click()
+                    # Use the Hybrid Strategy to find the button/link
+                    target = find_element(page, provided_selector, desc)
+                    target.click()
                     logs.append(f"✅ Step {i+1}: Clicked '{desc}'")
+
+                elif action == 'waitFor':
+                    timeout = int(step.get('waitTime', 5)) * 1000
+                    page.wait_for_timeout(timeout)
+                    logs.append(f"✅ Step {i+1}: Waited for {timeout/1000}s")
 
                 # Capture final state screenshot
                 if i == len(steps) - 1:
@@ -119,5 +146,4 @@ def run_playwright(data):
         })
 
 if __name__ == '__main__':
-    # Listen on port 10000 for Render compatibility
     app.run(host='0.0.0.0', port=10000)
