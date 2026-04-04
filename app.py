@@ -8,6 +8,13 @@ import base64
 
 app = Flask(__name__)
 
+def discover_locators(page):
+    # Captures an AI-optimized snapshot of the page
+    snapshot = page.accessibility.snapshot()
+    # This returns a list of all roles (button, link, textbox) 
+    # and their accessible names (Search, Login)
+    return snapshot
+    
 # HYBRID LOCATOR STRATEGY: Combines Option A (Precision) and Option B (Self-Healing)
 def find_element(page, selector, desc):
     """
