@@ -16,7 +16,7 @@ async def run_playwright_test(test_data):
     status = "SUCCESS"
     
     async with async_playwright() as p:
-        # Args to survive on Render's Free Tier RAM
+        # Launch options optimized for Render's memory limits
         browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
         context = await browser.new_context(viewport={'width': 1280, 'height': 720})
         page = await context.new_page()
@@ -44,7 +44,7 @@ async def run_playwright_test(test_data):
                         results.append(f"Step {i+1}: Navigated to {url}")
 
                     elif action in ['type', 'fill']:
-                        # --- SMART LOCATOR (The Mohan-Proof Brain) ---
+                        # --- SMART LOCATOR (Self-Healing) ---
                         loc = None
                         if selector and selector != ':root':
                             loc = page.locator(selector)
@@ -52,13 +52,15 @@ async def run_playwright_test(test_data):
                                 loc = None 
                         
                         if not loc:
-                            # Clean the name to handle "Search box" vs "Search"
+                            # Mohan-proof: Clean common human suffixes (box, field)
                             clean_name = t_name.lower().replace(" box", "").replace(" field", "").strip()
                             loc = page.get_by_role("combobox", name=clean_name, exact=False).or_(
                                   page.get_by_role("textbox", name=clean_name, exact=False)).first
                         
                         await loc.fill(value)
-                        results.append(f"Step {i+1}: Typed '{value}' into {t_name}")
+                        # Fallback: Press Enter in case the search button is obscured by suggestions
+                        await page.keyboard.press("Enter")
+                        results.append(f"Step {i+1}: Typed '{value}' and pressed Enter")
 
                     elif action == 'click':
                         if selector and selector != ':root':
@@ -74,11 +76,10 @@ async def run_playwright_test(test_data):
                         results.append(f"Step {i+1}: Verified text '{value}' is present")
 
                 except Exception as step_error:
-                    # Capture page source for the AI Healer if a step fails
                     page_source = await page.content()
                     raise Exception(f"Step {i+1} failed: {str(step_error)}")
 
-            # Success Screenshot
+            # Final Success Screenshot
             screenshot_bytes = await page.screenshot(full_page=True)
             screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
 
