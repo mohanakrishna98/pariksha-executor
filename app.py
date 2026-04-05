@@ -43,18 +43,23 @@ async def run_playwright_test(test_data):
                         await page.goto(url, wait_until="domcontentloaded")
                         results.append(f"Step {i+1}: Navigated to {url}")
 
-                    elif action in ['type', 'fill']:
+                   elif action in ['type', 'fill']:
                         # --- SMART LOCATOR (Self-Healing) ---
-                        # Try exact selector first, then fallback to role/name
                         loc = None
+                        
+                        # 1. Try exact CSS selector first
                         if selector and selector != ':root':
                             loc = page.locator(selector)
                             if await loc.count() == 0: loc = None 
                         
                         if not loc:
-                            # Fallback to smart roles (Combobox/Textbox)
-                            loc = page.get_by_role("combobox", name=t_name, exact=False).or_(
-                                  page.get_by_role("textbox", name=t_name, exact=False)).first
+                            # 2. Mohan-proof: Clean common human suffixes (box, field, input)
+                            # This turns "Search box" into "Search"
+                            clean_name = t_name.lower().replace(" box", "").replace(" field", "").replace(" input", "").strip()
+                            
+                            # 3. Fallback to smart roles with the cleaned name
+                            loc = page.get_by_role("combobox", name=clean_name, exact=False).or_(
+                                  page.get_by_role("textbox", name=clean_name, exact=False)).first
                         
                         await loc.fill(value)
                         results.append(f"Step {i+1}: Typed '{value}' into {t_name}")
