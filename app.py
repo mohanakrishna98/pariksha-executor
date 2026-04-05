@@ -102,6 +102,10 @@ def run_selenium_test(test_data):
         
     return status, results, screenshot_base64
 
+@app.route('/')
+def home():
+    return "Pariksha Executor is LIVE and ready for tests!", 200
+    
 # --- THE RELAY ROUTE ---
 @app.route('/run-test', methods=['POST'])
 async def run_test():
