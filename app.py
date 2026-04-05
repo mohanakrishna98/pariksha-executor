@@ -5,7 +5,6 @@ import asyncio
 import os
 import logging
 
-# Initialize Flask and Logging
 app = Flask(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
@@ -16,23 +15,24 @@ async def run_playwright_test(test_data):
     status = "SUCCESS"
     
     async with async_playwright() as p:
-        # Launch options optimized for Render's memory limits
         browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-        context = await browser.new_context(viewport={'width': 1280, 'height': 720})
+        
+        # ADDED: Stealth User-Agent to help avoid the Google "Sorry" page
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            viewport={'width': 1280, 'height': 720}
+        )
         page = await context.new_page()
         
         try:
-            # Handles both top-level 'steps' or nested 'testCase.steps'
             test_payload = test_data.get('testCase') if isinstance(test_data.get('testCase'), dict) else test_data
             steps = test_payload.get('steps', [])
             
             for i, step in enumerate(steps):
-                # 1. Normalize Action Names
                 action = step.get('action', '').lower()
                 if action in ['verify text', 'assert_text', 'verify']: 
                     action = 'verify'
                 
-                # 2. Extract Data
                 t_name = step.get('target_description', 'Element')
                 selector = step.get('selector', '')
                 value = step.get('data') or step.get('expected_value') or step.get('value', '')
@@ -44,30 +44,30 @@ async def run_playwright_test(test_data):
                         results.append(f"Step {i+1}: Navigated to {url}")
 
                     elif action in ['type', 'fill']:
-                        # --- SMART LOCATOR (Self-Healing) ---
                         loc = None
                         if selector and selector != ':root':
                             loc = page.locator(selector)
-                            if await loc.count() == 0: 
-                                loc = None 
+                            if await loc.count() == 0: loc = None 
                         
                         if not loc:
-                            # Mohan-proof: Clean common human suffixes (box, field)
                             clean_name = t_name.lower().replace(" box", "").replace(" field", "").strip()
                             loc = page.get_by_role("combobox", name=clean_name, exact=False).or_(
                                   page.get_by_role("textbox", name=clean_name, exact=False)).first
                         
                         await loc.fill(value)
-                        # Fallback: Press Enter in case the search button is obscured by suggestions
                         await page.keyboard.press("Enter")
-                        results.append(f"Step {i+1}: Typed '{value}' and pressed Enter")
+                        
+                        # --- DETECTION PHASE (Inside the Type logic) ---
+                        await asyncio.sleep(2) # Give the page a second to react
+                        if "google.com/sorry" in page.url or await page.get_by_text("unusual traffic").is_visible():
+                            page_source = await page.content()
+                            raise Exception("BOT_BLOCKED: Google detected the script. Need Stealth/Proxy.")
+                        # --- END DETECTION PHASE ---
+                        
+                        results.append(f"Step {i+1}: Typed '{value}' and verified no bot-block.")
 
                     elif action == 'click':
-                        if selector and selector != ':root':
-                            loc = page.locator(selector)
-                        else:
-                            loc = page.get_by_role("button", name=t_name, exact=False).or_(
-                                  page.get_by_text(t_name, exact=False)).first
+                        loc = page.locator(selector) if selector and selector != ':root' else page.get_by_role("button", name=t_name, exact=False).or_(page.get_by_text(t_name, exact=False)).first
                         await loc.click()
                         results.append(f"Step {i+1}: Clicked {t_name}")
 
@@ -79,7 +79,6 @@ async def run_playwright_test(test_data):
                     page_source = await page.content()
                     raise Exception(f"Step {i+1} failed: {str(step_error)}")
 
-            # Final Success Screenshot
             screenshot_bytes = await page.screenshot(full_page=True)
             screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
 
@@ -89,10 +88,8 @@ async def run_playwright_test(test_data):
             try:
                 screenshot_bytes = await page.screenshot(full_page=True)
                 screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
-                if not page_source: 
-                    page_source = await page.content()
-            except:
-                pass
+                if not page_source: page_source = await page.content()
+            except: pass
         finally:
             await browser.close()
             
@@ -102,11 +99,7 @@ async def run_playwright_test(test_data):
 def run_test():
     try:
         data = request.json
-        if not data:
-            return jsonify({"error": "No payload"}), 400
-            
         status, logs, screenshot, html_dump = asyncio.run(run_playwright_test(data))
-        
         return jsonify({
             "status": status,
             "actualResults": "\n".join(logs),
@@ -114,12 +107,11 @@ def run_test():
             "pageSource": html_dump
         })
     except Exception as e:
-        app.logger.error(f"CRITICAL ERROR: {str(e)}")
         return jsonify({"status": "ERROR", "actualResults": str(e)}), 500
 
 @app.route('/')
 def home():
-    return "Pariksha Executor is LIVE and ready for tests!", 200
+    return "Pariksha Executor is LIVE!", 200
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
