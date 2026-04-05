@@ -4,3 +4,4 @@ playwright
 webdriver-manager
 gunicorn
 playwright-stealth
+selenium-stealth
