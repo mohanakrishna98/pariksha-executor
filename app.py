@@ -1,12 +1,10 @@
 from flask import Flask, request, jsonify
 from playwright.async_api import async_playwright
-# EXPLICIT IMPORTS: Grabbing the tool, not the folder
-from playwright_stealth import stealth as pw_stealth 
+import playwright_stealth # Import the module directly
+import selenium_stealth   # Import the module directly
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium_stealth import stealth as sel_stealth
-
 import base64
 import asyncio
 import os
@@ -14,6 +12,20 @@ import logging
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.DEBUG)
+
+# --- HELPER: Safe Stealth Injection ---
+async def apply_playwright_stealth(page):
+    """Mohan-proof: Finds the function regardless of module structure."""
+    try:
+        # Check if the function is directly in the module or nested
+        if hasattr(playwright_stealth, 'stealth'):
+            func = playwright_stealth.stealth
+            # If 'stealth' is another module, go one level deeper
+            if not callable(func) and hasattr(func, 'stealth'):
+                func = func.stealth
+            await func(page)
+    except Exception as e:
+        logging.warning(f"Playwright Stealth injection failed: {e}")
 
 # --- PLAYWRIGHT ENGINE ---
 async def run_playwright_test(test_data):
@@ -29,8 +41,8 @@ async def run_playwright_test(test_data):
         )
         page = await context.new_page()
         
-        # APPLY STEALTH: Using the direct function alias
-        await pw_stealth(page)
+        # Apply the Ghost-Runner Armor
+        await apply_playwright_stealth(page)
         
         try:
             test_payload = test_data.get('testCase') if isinstance(test_data.get('testCase'), dict) else test_data
@@ -43,56 +55,37 @@ async def run_playwright_test(test_data):
                 value = step.get('data') or step.get('expected_value') or step.get('value', '')
                 url = step.get('url') or value
 
-                try:
-                    if action == 'navigate':
-                        await page.goto(url, wait_until="domcontentloaded")
-                        results.append(f"Step {i+1}: Navigated to {url}")
+                if action == 'navigate':
+                    await page.goto(url, wait_until="domcontentloaded")
+                    results.append(f"Step {i+1}: Navigated to {url}")
 
-                    elif action in ['type', 'fill']:
-                        # --- SMART LOCATOR (Mohan-Proof) ---
-                        loc = None
-                        if selector and selector != ':root':
-                            loc = page.locator(selector)
-                            if await loc.count() == 0: loc = None 
-                        
-                        if not loc:
-                            clean_name = t_name.lower().replace(" box", "").strip()
-                            loc = page.get_by_role("combobox", name=clean_name, exact=False).or_(
-                                  page.get_by_role("textbox", name=clean_name, exact=False)).first
-                        
-                        await loc.fill(value)
-                        await page.keyboard.press("Enter")
-                        
-                        # --- BOT DETECTION ---
-                        await asyncio.sleep(2)
-                        if "google.com/sorry" in page.url or await page.get_by_text("unusual traffic").is_visible():
-                            raise Exception("BOT_BLOCKED: Google triggered a CAPTCHA.")
-                        
-                        results.append(f"Step {i+1}: Typed '{value}' and reached results.")
+                elif action in ['type', 'fill']:
+                    # Smart Locator Logic
+                    clean_name = t_name.lower().replace(" box", "").strip()
+                    loc = page.get_by_role("combobox", name=clean_name, exact=False).or_(
+                          page.get_by_role("textbox", name=clean_name, exact=False)).first
+                    
+                    await loc.fill(value)
+                    await page.keyboard.press("Enter")
+                    
+                    # Bot Detection Phase
+                    await asyncio.sleep(2)
+                    if "google.com/sorry" in page.url or await page.get_by_text("unusual traffic").is_visible():
+                        raise Exception("BOT_BLOCKED: Google detected the script. Capture for AI Healer.")
+                    
+                    results.append(f"Step {i+1}: Typed '{value}' and verified no bot-block.")
 
-                    elif action == 'click':
-                        if selector and selector != ':root':
-                            loc = page.locator(selector)
-                        else:
-                            loc = page.get_by_role("button", name=t_name, exact=False).or_(
-                                  page.get_by_text(t_name, exact=False)).first
-                        await loc.click()
-                        results.append(f"Step {i+1}: Clicked {t_name}")
-
-                except Exception as step_error:
-                    page_source = await page.content()
-                    raise Exception(f"Step {i+1} failed: {str(step_error)}")
+                elif action == 'click':
+                    loc = page.locator(selector) if selector and selector != ':root' else page.get_by_role("button", name=t_name, exact=False).or_(page.get_by_text(t_name, exact=False)).first
+                    await loc.click()
+                    results.append(f"Step {i+1}: Clicked {t_name}")
 
             screenshot_bytes = await page.screenshot(full_page=True)
             screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
         except Exception as e:
             status = "FAILED"
             results.append(f"ERROR: {str(e)}")
-            try:
-                screenshot_bytes = await page.screenshot(full_page=True)
-                screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
-                if not page_source: page_source = await page.content()
-            except: pass
+            page_source = await page.content()
         finally:
             await browser.close()
             
@@ -111,15 +104,12 @@ def run_selenium_test(test_data):
     
     driver = webdriver.Chrome(options=chrome_options)
     
-    # APPLY STEALTH: Direct function call
-    sel_stealth(driver,
-        languages=["en-US", "en"],
-        vendor="Google Inc.",
-        platform="Win32",
-        webgl_vendor="Intel Inc.",
-        renderer="Intel Iris OpenGL Engine",
-        fix_hairline=True,
-    )
+    # Safe Selenium Stealth Injection
+    try:
+        if hasattr(selenium_stealth, 'stealth'):
+            selenium_stealth.stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", webgl_vendor="Intel Inc.", renderer="Intel Iris OpenGL Engine", fix_hairline=True)
+    except Exception as e:
+        logging.warning(f"Selenium Stealth failed: {e}")
     
     try:
         test_payload = test_data.get('testCase') if isinstance(test_data.get('testCase'), dict) else test_data
@@ -128,7 +118,6 @@ def run_selenium_test(test_data):
         for i, step in enumerate(steps):
             action = step.get('action', '').lower()
             url = step.get('url') or step.get('data', '')
-            
             if action == 'navigate':
                 driver.get(url)
                 if "google.com/sorry" in driver.current_url:
@@ -151,7 +140,6 @@ def run_test():
     try:
         data = request.json
         executor_type = data.get('executor_type', 'playwright').lower()
-        
         if executor_type == 'selenium':
             status, logs, screenshot, html = run_selenium_test(data)
         else:
