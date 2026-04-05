@@ -1,156 +1,124 @@
 from flask import Flask, request, jsonify
+from playwright.async_api import async_playwright
 from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options as SeleniumOptions
-from webdriver_manager.chrome import ChromeDriverManager
-from playwright.sync_api import sync_playwright
 import base64
+import asyncio
+import os
+import time
 
 app = Flask(__name__)
 
-def discover_locators(page):
-    # Captures an AI-optimized snapshot of the page
-    snapshot = page.accessibility.snapshot()
-    # This returns a list of all roles (button, link, textbox) 
-    # and their accessible names (Search, Login)
-    return snapshot
+# --- PLAYWRIGHT ENGINE (With Combobox Fix) ---
+async def run_playwright_test(test_data):
+    results = []
+    screenshot_base64 = None
+    status = "SUCCESS"
     
-# HYBRID LOCATOR STRATEGY: Combines Option A (Precision) and Option B (Self-Healing)
-def find_element(page, selector, desc):
-    """
-    Attempts to find an element using multiple strategies to increase test resilience.
-    """
-    # Strategy 1: Attempt the direct CSS selector (Option A)
-    if selector:
-        loc = page.locator(selector)
-        if loc.count() > 0:
-            return loc
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(viewport={'width': 1280, 'height': 720})
+        page = await context.new_page()
+        
+        try:
+            steps = test_data.get('steps') or test_data.get('testCase', [])
+            for i, step in enumerate(steps):
+                action = step.get('action', '').lower()
+                target_name = step.get('target_description', '')
+                selector = step.get('selector', '')
+                value = step.get('value') or step.get('data', '')
 
-    # Strategy 2: Attempt to find by Test ID or ARIA labels (Option B)
-    loc = page.locator(f"[data-testid='{desc}']").or_(
-          page.get_by_placeholder(desc, exact=False)
-    ).or_(
-          page.get_by_label(desc, exact=False)
-    )
-    if loc.count() > 0:
-        return loc
+                if action == 'navigate':
+                    await page.goto(value, wait_until="networkidle")
+                    results.append(f"Step {i+1}: Navigated to {value}")
 
-    # Strategy 3: Semantic Roles (Button/Link) fallback
-    loc = page.get_by_role("button", name=desc, exact=False).or_(
-          page.get_by_role("link", name=desc, exact=False)
-    )
-    if loc.count() > 0:
-        return loc
+                elif action in ['type', 'fill']:
+                    # Priority: 1. Explicit Selector | 2. Combobox/Textbox Role | 3. Label/Placeholder
+                    if selector:
+                        locator = page.locator(selector)
+                    else:
+                        combobox = page.get_by_role("combobox", name=target_name, exact=False)
+                        textbox = page.get_by_role("textbox", name=target_name, exact=False)
+                        if await combobox.count() > 0:
+                            locator = combobox.first
+                        elif await textbox.count() > 0:
+                            locator = textbox.first
+                        else:
+                            locator = page.get_by_label(target_name).or_(page.get_by_placeholder(target_name)).first
+                    
+                    await locator.fill(value)
+                    results.append(f"Step {i+1}: Typed '{value}' into {target_name}")
 
-    # Strategy 4: Final Fuzzy Text Match
-    return page.get_by_text(desc, exact=False)
+                elif action == 'click':
+                    locator = page.locator(selector) if selector else page.get_by_role("button", name=target_name).or_(page.get_by_text(target_name)).first
+                    await locator.click()
+                    results.append(f"Step {i+1}: Clicked {target_name}")
 
-@app.route('/run-test', methods=['POST'])
-def run_test():
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"status": "ERROR", "message": "No JSON data received"}), 400
+            screenshot_bytes = await page.screenshot(full_page=True)
+            screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
 
-        print(f"DEBUG: Received request. Payload: {data}")
+        except Exception as e:
+            status = "FAILED"
+            results.append(f"Step FAILED: {str(e)}")
+        finally:
+            await browser.close()
+            
+    return status, results, screenshot_base64
 
-        tool = data.get('executor', 'playwright').lower()
-
-        if tool == 'selenium':
-            steps = data.get('steps') or data.get('testCase', {}).get('steps', [])
-            target_url = steps[0].get('url') if steps else "https://www.google.com"
-            return run_selenium(target_url)
-        else:
-            return run_playwright(data)
-
-    except Exception as e:
-        print(f"DEBUG ERROR: {str(e)}")
-        return jsonify({"status": "ERROR", "message": str(e)}), 500
-
-def run_selenium(url):
-    chrome_options = SeleniumOptions()
+# --- SELENIUM ENGINE ---
+def run_selenium_test(test_data):
+    results = []
+    screenshot_base64 = None
+    status = "SUCCESS"
+    
+    chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.binary_location = "/usr/bin/google-chrome"
-
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-
+    
+    driver = webdriver.Chrome(options=chrome_options)
+    
     try:
-        driver.get(url)
-        title = driver.title
-        return jsonify({
-            "status": "PASSED",
-            "tool": "Selenium",
-            "actualResults": f"Selenium visited {url}. Title: {title}" 
-        })
+        steps = test_data.get('steps') or test_data.get('testCase', [])
+        for i, step in enumerate(steps):
+            action = step.get('action', '').lower()
+            value = step.get('value') or step.get('data', '')
+            
+            if action == 'navigate':
+                driver.get(value)
+                results.append(f"Step {i+1}: (Selenium) Navigated to {value}")
+            # Add additional Selenium action logic (find_element) here as needed
+            
+        screenshot_bytes = driver.get_screenshot_as_png()
+        screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
+        
+    except Exception as e:
+        status = "FAILED"
+        results.append(f"Selenium FAILED: {str(e)}")
     finally:
         driver.quit()
+        
+    return status, results, screenshot_base64
 
-def run_playwright(data):
-    steps = data.get('steps') or data.get('testCase', {}).get('steps', [])
+# --- THE RELAY ROUTE ---
+@app.route('/run-test', methods=['POST'])
+async def run_test():
+    data = request.json
+    executor_type = data.get('executor_type', 'playwright').lower()
     
-    if not steps:
-         return jsonify({"status": "FAILED", "actualResults": "No steps found in the payload."})
-
-    with sync_playwright() as p:
-        # Launching the headless engine on Render
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.set_viewport_size({"width": 1280, "height": 720})
-        
-        logs = []
-        screenshot_raw = None
-        
-        for i, step in enumerate(steps):
-            action = step.get('action')
-            desc = step.get('target_description', step.get('value', 'element'))
-            step_url = step.get('url')
-            step_data = step.get('data', step.get('value', ''))
-            # Priority on provided CSS selector
-            provided_selector = step.get('selector') 
-            
-            try:
-                if action == 'navigate':
-                    page.goto(step_url, wait_until="networkidle", timeout=30000)
-                    logs.append(f"✅ Step {i+1}: Navigated to {step_url}")
-                
-                elif action in ['type', 'fill']:
-                    # Use the Hybrid Strategy to find the input
-                    target = find_element(page, provided_selector, desc)
-                    target.fill(step_data)
-                    logs.append(f"✅ Step {i+1}: Typed '{step_data}' into '{desc}'")
-                
-                elif action == 'click':
-                    # Use the Hybrid Strategy to find the button/link
-                    target = find_element(page, provided_selector, desc)
-                    target.click()
-                    logs.append(f"✅ Step {i+1}: Clicked '{desc}'")
-
-                elif action == 'waitFor':
-                    timeout = int(step.get('waitTime', 5)) * 1000
-                    page.wait_for_timeout(timeout)
-                    logs.append(f"✅ Step {i+1}: Waited for {timeout/1000}s")
-
-                # Capture final state screenshot
-                if i == len(steps) - 1:
-                    screenshot_bytes = page.screenshot(full_page=False)
-                    screenshot_raw = base64.b64encode(screenshot_bytes).decode('utf-8')
-
-            except Exception as e:
-                logs.append(f"❌ Step {i+1} FAILED: {str(e)}")
-                screenshot_bytes = page.screenshot(full_page=False)
-                screenshot_raw = base64.b64encode(screenshot_bytes).decode('utf-8')
-                break 
-
-        browser.close()
-        
-        return jsonify({
-            "status": "PASSED" if "❌" not in "".join(logs) else "FAILED",
-            "actualResults": "\n".join(logs), 
-            "screenshotBase64": screenshot_raw
-        })
+    if executor_type == 'selenium':
+        status, logs, screenshot = run_selenium_test(data)
+    else:
+        status, logs, screenshot = await run_playwright_test(data)
+    
+    return jsonify({
+        "status": status,
+        "actualResults": "\n".join(logs),
+        "screenshotBase64": screenshot
+    })
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=10000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
