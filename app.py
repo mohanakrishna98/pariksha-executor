@@ -1,9 +1,18 @@
 from flask import Flask, request, jsonify
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth_async
+# CORRECTED IMPORT: The function is named 'stealth', not 'stealth_async'
+try:
+    from playwright_stealth import stealth as playwright_stealth
+except ImportError:
+    playwright_stealth = None
+
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium_stealth import stealth # Selenium's version of the armor
+try:
+    from selenium_stealth import stealth as selenium_stealth
+except ImportError:
+    selenium_stealth = None
+
 import base64
 import asyncio
 import os
@@ -12,7 +21,7 @@ import logging
 app = Flask(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
-# --- PLAYWRIGHT ENGINE (With Stealth) ---
+# --- PLAYWRIGHT ENGINE ---
 async def run_playwright_test(test_data):
     results = []
     screenshot_base64, page_source = None, None
@@ -25,7 +34,10 @@ async def run_playwright_test(test_data):
             viewport={'width': 1280, 'height': 720}
         )
         page = await context.new_page()
-        await stealth_async(page) # Playwright Armor
+        
+        # Apply Playwright Stealth Armor
+        if playwright_stealth:
+            await playwright_stealth(page)
         
         try:
             test_payload = test_data.get('testCase') if isinstance(test_data.get('testCase'), dict) else test_data
@@ -42,15 +54,16 @@ async def run_playwright_test(test_data):
                     await page.goto(url, wait_until="domcontentloaded")
                     results.append(f"Step {i+1}: Navigated to {url}")
                 elif action in ['type', 'fill']:
-                    # Smart Locator logic included
+                    # Mohan-proof Smart Locator logic
                     clean_name = t_name.lower().replace(" box", "").strip()
                     loc = page.get_by_role("combobox", name=clean_name, exact=False).first
                     await loc.fill(value)
                     await page.keyboard.press("Enter")
-                    await asyncio.sleep(2)
+                    
                     # Bot Detection Phase
+                    await asyncio.sleep(2)
                     if "google.com/sorry" in page.url:
-                        raise Exception("BOT_BLOCKED: Playwright detected by Google.")
+                        raise Exception("BOT_BLOCKED: Playwright detected.")
                     results.append(f"Step {i+1}: Typed '{value}'")
 
             screenshot_bytes = await page.screenshot(full_page=True)
@@ -64,7 +77,7 @@ async def run_playwright_test(test_data):
             
     return status, results, screenshot_base64, page_source
 
-# --- SELENIUM ENGINE (With Stealth) ---
+# --- SELENIUM ENGINE ---
 def run_selenium_test(test_data):
     results = []
     screenshot_base64, page_source = None, None
@@ -74,20 +87,18 @@ def run_selenium_test(test_data):
     chrome_options.add_argument("--headless")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
     
     driver = webdriver.Chrome(options=chrome_options)
     
-    # APPLY SELENIUM STEALTH
-    stealth(driver,
-        languages=["en-US", "en"],
-        vendor="Google Inc.",
-        platform="Win32",
-        webgl_vendor="Intel Inc.",
-        renderer="Intel Iris OpenGL Engine",
-        fix_hairline=True,
-    )
+    if selenium_stealth:
+        selenium_stealth(driver,
+            languages=["en-US", "en"],
+            vendor="Google Inc.",
+            platform="Win32",
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True,
+        )
     
     try:
         test_payload = test_data.get('testCase') if isinstance(test_data.get('testCase'), dict) else test_data
@@ -99,11 +110,9 @@ def run_selenium_test(test_data):
             
             if action == 'navigate':
                 driver.get(url)
-                # Selenium Bot Detection
                 if "google.com/sorry" in driver.current_url:
-                    raise Exception("BOT_BLOCKED: Selenium detected by Google.")
+                    raise Exception("BOT_BLOCKED: Selenium detected.")
                 results.append(f"Step {i+1}: (Selenium) Navigated to {url}")
-            # Additional Selenium logic would go here
 
         screenshot_bytes = driver.get_screenshot_as_png()
         screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
@@ -118,20 +127,23 @@ def run_selenium_test(test_data):
 
 @app.route('/run-test', methods=['POST'])
 def run_test():
-    data = request.json
-    executor_type = data.get('executor_type', 'playwright').lower()
-    
-    if executor_type == 'selenium':
-        status, logs, screenshot, html = run_selenium_test(data)
-    else:
-        status, logs, screenshot, html = asyncio.run(run_playwright_test(data))
-    
-    return jsonify({
-        "status": status,
-        "actualResults": "\n".join(logs),
-        "screenshotBase64": screenshot,
-        "pageSource": html
-    })
+    try:
+        data = request.json
+        executor_type = data.get('executor_type', 'playwright').lower()
+        
+        if executor_type == 'selenium':
+            status, logs, screenshot, html = run_selenium_test(data)
+        else:
+            status, logs, screenshot, html = asyncio.run(run_playwright_test(data))
+        
+        return jsonify({
+            "status": status,
+            "actualResults": "\n".join(logs),
+            "screenshotBase64": screenshot,
+            "pageSource": html
+        })
+    except Exception as e:
+        return jsonify({"status": "ERROR", "actualResults": str(e)}), 500
 
 @app.route('/')
 def home():
