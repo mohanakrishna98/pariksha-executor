@@ -1,7 +1,6 @@
 flask
-selenium
 playwright
-webdriver-manager
-gunicorn
 playwright-stealth
+selenium
 selenium-stealth
+gunicorn
