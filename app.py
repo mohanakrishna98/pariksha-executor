@@ -1,17 +1,10 @@
 from flask import Flask, request, jsonify
 from playwright.async_api import async_playwright
-# CORRECTED IMPORT: The function is named 'stealth', not 'stealth_async'
-try:
-    from playwright_stealth import stealth as playwright_stealth
-except ImportError:
-    playwright_stealth = None
+import playwright_stealth  # Import the module directly
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-try:
-    from selenium_stealth import stealth as selenium_stealth
-except ImportError:
-    selenium_stealth = None
+import selenium_stealth  # Import the module directly
 
 import base64
 import asyncio
@@ -35,9 +28,11 @@ async def run_playwright_test(test_data):
         )
         page = await context.new_page()
         
-        # Apply Playwright Stealth Armor
-        if playwright_stealth:
-            await playwright_stealth(page)
+        # APPLY STEALTH: Using the explicit module.function path
+        try:
+            await playwright_stealth.stealth(page)
+        except Exception as e:
+            logging.warning(f"Stealth injection failed: {e}")
         
         try:
             test_payload = test_data.get('testCase') if isinstance(test_data.get('testCase'), dict) else test_data
@@ -54,7 +49,7 @@ async def run_playwright_test(test_data):
                     await page.goto(url, wait_until="domcontentloaded")
                     results.append(f"Step {i+1}: Navigated to {url}")
                 elif action in ['type', 'fill']:
-                    # Mohan-proof Smart Locator logic
+                    # Mohan-proof Smart Locator
                     clean_name = t_name.lower().replace(" box", "").strip()
                     loc = page.get_by_role("combobox", name=clean_name, exact=False).first
                     await loc.fill(value)
@@ -63,7 +58,7 @@ async def run_playwright_test(test_data):
                     # Bot Detection Phase
                     await asyncio.sleep(2)
                     if "google.com/sorry" in page.url:
-                        raise Exception("BOT_BLOCKED: Playwright detected.")
+                        raise Exception("BOT_BLOCKED: Google detected the script.")
                     results.append(f"Step {i+1}: Typed '{value}'")
 
             screenshot_bytes = await page.screenshot(full_page=True)
@@ -90,8 +85,9 @@ def run_selenium_test(test_data):
     
     driver = webdriver.Chrome(options=chrome_options)
     
-    if selenium_stealth:
-        selenium_stealth(driver,
+    # APPLY STEALTH: Using the explicit module.function path
+    try:
+        selenium_stealth.stealth(driver,
             languages=["en-US", "en"],
             vendor="Google Inc.",
             platform="Win32",
@@ -99,6 +95,8 @@ def run_selenium_test(test_data):
             renderer="Intel Iris OpenGL Engine",
             fix_hairline=True,
         )
+    except Exception as e:
+        logging.warning(f"Selenium Stealth injection failed: {e}")
     
     try:
         test_payload = test_data.get('testCase') if isinstance(test_data.get('testCase'), dict) else test_data
