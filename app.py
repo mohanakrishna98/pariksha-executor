@@ -60,13 +60,22 @@ async def run_playwright_test(test_data):
                     results.append(f"Step {i+1}: Navigated to {url}")
 
                 elif action in ['type', 'fill']:
-                    # Smart Locator Logic
+                    # --- UNIVERSAL SMART LOCATOR ---
                     clean_name = t_name.lower().replace(" box", "").strip()
-                    loc = page.get_by_role("combobox", name=clean_name, exact=False).or_(
-                          page.get_by_role("textbox", name=clean_name, exact=False)).first
                     
+                    # We check for: searchbox, textbox, OR combobox
+                    loc = page.get_by_role("searchbox", name=clean_name, exact=False).or_(
+                          page.get_by_role("textbox", name=clean_name, exact=False)).or_(
+                          page.get_by_role("combobox", name=clean_name, exact=False)).first
+                    
+                    # Fallback: If roles fail, try searching for name or id directly
+                    if await loc.count() == 0:
+                        loc = page.locator(f"input[name*='{clean_name}'], input[id*='{clean_name}']").first
+
                     await loc.fill(value)
                     await page.keyboard.press("Enter")
+                    
+                    results.append(f"Step {i+1}: Typed '{value}' into {t_name}")
                     
                     # --- REFINED BOT DETECTION PHASE (Mohan-Proof) ---
                     await asyncio.sleep(3) # Give Google an extra second to show the "Wall"
