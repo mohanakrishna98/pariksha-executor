@@ -68,12 +68,23 @@ async def run_playwright_test(test_data):
                     await loc.fill(value)
                     await page.keyboard.press("Enter")
                     
-                    # Bot Detection Phase
-                    await asyncio.sleep(2)
-                    if "google.com/sorry" in page.url or await page.get_by_text("unusual traffic").is_visible():
-                        raise Exception("BOT_BLOCKED: Google detected the script. Capture for AI Healer.")
+                    # --- REFINED BOT DETECTION PHASE (Mohan-Proof) ---
+                    await asyncio.sleep(3) # Give Google an extra second to show the "Wall"
                     
-                    results.append(f"Step {i+1}: Typed '{value}' and verified no bot-block.")
+                    # Look for the specific markers seen in your actual screenshot
+                    is_blocked = (
+                        "google.com/sorry" in page.url or 
+                        await page.get_by_text("unusual traffic", exact=False).is_visible() or
+                        await page.get_by_text("About this page", exact=False).is_visible() or
+                        "captcha" in (await page.content()).lower()
+                    )
+
+                    if is_blocked:
+                        # Capture the evidence before failing
+                        page_source = await page.content()
+                        raise Exception("BOT_BLOCKED: Google triggered a CAPTCHA challenge.")
+                    
+                    results.append(f"Step {i+1}: Typed '{value}' and successfully reached results.")
 
                 elif action == 'click':
                     loc = page.locator(selector) if selector and selector != ':root' else page.get_by_role("button", name=t_name, exact=False).or_(page.get_by_text(t_name, exact=False)).first
