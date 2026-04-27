@@ -147,6 +147,43 @@ def run_test():
 def home():
     return "Pariksha Executor is LIVE!", 200
 
+# --- NEW: DISCOVERY SCAN ROUTE ---
+@app.route('/scan', methods=['POST'])
+def scan():
+    try:
+        data = request.json
+        url = data.get('url')
+        
+        async def perform_scan(target_url):
+            async with async_playwright() as p:
+                browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+                context = await browser.new_context(viewport={'width': 1280, 'height': 720})
+                page = await context.new_page()
+                await apply_playwright_stealth(page)
+                
+                # Navigate and wait for the page to be fully loaded
+                await page.goto(target_url, wait_until="documentloaded")
+                
+                # --- THE DNA CAPTURE ---
+                # This captures the 'Accessibility Tree' in a YAML format for the AI
+                dna_map = await page.aria_snapshot()
+                
+                await browser.close()
+                return dna_map
+
+        # Execute the scan
+        dna_result = asyncio.run(perform_scan(url))
+        
+        return jsonify({
+            "status": "SUCCESS",
+            "url": url,
+            "dna_map": dna_result  # This is the YAML text string
+        })
+        
+    except Exception as e:
+        logging.error(f"Scan failed: {str(e)}")
+        return jsonify({"status": "ERROR", "message": str(e)}), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
