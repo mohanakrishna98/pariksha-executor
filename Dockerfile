@@ -1,5 +1,5 @@
 # Updated to the version required by the error message
-FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy
+FROM mcr.microsoft.com/playwright/python:v1.59.0-jammy
 
 # 1. Install standard Google Chrome (so Selenium still works)
 RUN apt-get update && apt-get install -y wget gnupg \
