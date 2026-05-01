@@ -77,6 +77,7 @@ async def run_playwright_test(test_data):
                     
                 # --- Click Functionality ---
                 elif action == 'click':
+                    selector = step.get('selector', '') # Safety fix: define selector here
                     loc = page.locator(selector) if selector and selector != ':root' else \
                           page.get_by_role("button", name=t_desc, exact=False).or_(
                           page.get_by_text(t_desc, exact=False)).first
@@ -147,7 +148,7 @@ def run_test():
 def home():
     return "Pariksha Executor is LIVE!", 200
 
-# --- NEW: DISCOVERY SCAN ROUTE ---
+# --- NEW: DISCOVERY SCAN ROUTE (WITH DEBUGGING) ---
 @app.route('/scan', methods=['POST'])
 def scan():
     try:
@@ -157,27 +158,39 @@ def scan():
         async def perform_scan(target_url):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
-                context = await browser.new_context(viewport={'width': 1280, 'height': 720})
+                # Added user_agent to help bypass Cloudflare/Bot protection
+                context = await browser.new_context(
+                    viewport={'width': 1280, 'height': 720},
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+                )
                 page = await context.new_page()
                 await apply_playwright_stealth(page)
                 
-                # Navigate and wait for the page to be fully loaded
+                # 1. Navigate and wait for the basic structure
                 await page.goto(target_url, wait_until="domcontentloaded")
                 
-                # --- THE DNA CAPTURE ---
+                # 2. THE FIX: Wait 5 seconds for React/Shopify to pass bot checks and render the UI
+                await page.wait_for_timeout(5000)
+                
+                # 3. DEBUG EYES: Take a picture of what the bot is actually seeing
+                screenshot_bytes = await page.screenshot(full_page=False)
+                debug_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
+                
+                # 4. THE DNA CAPTURE
                 # This captures the 'Accessibility Tree' in a YAML format for the AI
                 dna_map = await page.aria_snapshot()
                 
                 await browser.close()
-                return dna_map
+                return dna_map, debug_base64
 
         # Execute the scan
-        dna_result = asyncio.run(perform_scan(url))
+        dna_result, debug_screenshot = asyncio.run(perform_scan(url))
         
         return jsonify({
             "status": "SUCCESS",
             "url": url,
-            "dna_map": dna_result  # This is the YAML text string
+            "dna_map": dna_result,
+            "debug_screenshot": debug_screenshot
         })
         
     except Exception as e:
