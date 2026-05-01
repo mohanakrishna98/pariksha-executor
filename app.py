@@ -162,7 +162,7 @@ def scan():
                 await apply_playwright_stealth(page)
                 
                 # Navigate and wait for the page to be fully loaded
-                await page.goto(target_url, wait_until="documentloaded")
+                await page.goto(target_url, wait_until="domcontentloaded")
                 
                 # --- THE DNA CAPTURE ---
                 # This captures the 'Accessibility Tree' in a YAML format for the AI
