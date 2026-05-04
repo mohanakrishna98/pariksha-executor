@@ -1,16 +1,18 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS  # <--- Added for BuildAI communication
 from playwright.async_api import async_playwright
 from playwright_stealth import stealth as playwright_stealth_func
-import selenium_stealth
-
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
 import base64
 import asyncio
 import os
 import logging
 
 app = Flask(__name__)
+
+# --- NEW: Enable CORS ---
+# This allows the browser to send requests from BuildAI.space to your Render server
+CORS(app, resources={r"/*": {"origins": "*"}})
+
 logging.basicConfig(level=logging.DEBUG)
 
 # --- HELPER: Safe Stealth Injection ---
@@ -50,12 +52,12 @@ async def run_playwright_test(test_data):
                 value = step.get('data') or step.get('expected_value') or step.get('value', '')
                 url = step.get('url') or value
                     
-             # --- NAVIGATE FUNCTIONALITY ---
+                # --- NAVIGATE ---
                 if action == 'navigate':
                     await page.goto(url, wait_until="domcontentloaded")
                     results.append(f"Step {i+1}: Navigated to {url}")
                     
-                # --- Type or FILL FUNCTIONALITY ---
+                # --- TYPE / FILL ---
                 elif action in ['type', 'fill']:
                     clean_name = t_desc.lower().replace(" box", "").strip()
                     loc = page.get_by_role("searchbox", name=clean_name, exact=False).or_(
@@ -68,41 +70,27 @@ async def run_playwright_test(test_data):
                     await loc.fill(value)
                     await page.keyboard.press("Enter")
                     results.append(f"Step {i+1}: Typed '{value}' into {t_desc}")
-                    
-                    # --- DOMAIN-AWARE GUARD ---
                     await asyncio.sleep(2)
-                    if "google.com" in page.url.lower():
-                        if await page.get_by_text("About this page", exact=False).is_visible():
-                            raise Exception("BOT_BLOCKED: Google triggered a security challenge.")
                     
-                # --- Click Functionality ---
+                # --- CLICK ---
                 elif action == 'click':
-                    selector = step.get('selector', '') # Safety fix: define selector here
+                    selector = step.get('selector', '') 
                     loc = page.locator(selector) if selector and selector != ':root' else \
                           page.get_by_role("button", name=t_desc, exact=False).or_(
                           page.get_by_text(t_desc, exact=False)).first
                     await loc.click()
                     results.append(f"Step {i+1}: Clicked {t_desc}")
 
-                # --- THE SIGN FUNCTIONALITY ---
+                # --- SIGN ---
                 elif action == 'sign':
-                    # 1. Find the signature area (usually an HTML5 canvas)
-                    # We look for a canvas element near the target description
                     loc = page.locator("canvas").first 
-                    
                     if await loc.count() > 0:
-                        # 2. Get the physical coordinates of the box on the screen
                         box = await loc.bounding_box()
-                        
                         if box:
-                            # 3. Move the mouse to the starting point
                             await page.mouse.move(box['x'] + 20, box['y'] + 20)
                             await page.mouse.down()
-                            
-                            # 4. Draw a "Signature Squiggle" (Moving the mouse in a pattern)
                             await page.mouse.move(box['x'] + box['width'] / 2, box['y'] + box['height'] - 20)
                             await page.mouse.move(box['x'] + box['width'] - 20, box['y'] + 20)
-                            
                             await page.mouse.up()
                             results.append(f"Step {i+1}: Signature applied to {t_desc}")
                         else:
@@ -110,7 +98,7 @@ async def run_playwright_test(test_data):
                     else:
                         raise Exception(f"Could not find a signature canvas for: {t_desc}")
 
-            # --- VERIFY FUNCTIONALITY ---                
+                # --- VERIFY ---
                 elif action == 'verify':
                     content = await page.content()
                     if value.lower() in content.lower():
@@ -118,13 +106,12 @@ async def run_playwright_test(test_data):
                     else:
                         raise Exception(f"Verification Failed: '{value}' not found.")
 
-            # --- SCREENSHOT CAPTURE FUNCTIONALITY ---
+            # --- SCREENSHOT ---
             try:
-                # full_page=False ensures we don't wait for infinite font loading
                 screenshot_bytes = await page.screenshot(full_page=False, timeout=8000)
                 screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
             except:
-                logging.warning("Screenshot timed out but logic passed.")
+                logging.warning("Screenshot timed out.")
 
         except Exception as e:
             status = "FAILED"
@@ -135,6 +122,7 @@ async def run_playwright_test(test_data):
     return status, results, screenshot_base64
 
 # --- API ROUTES ---
+
 @app.route('/run-test', methods=['POST'])
 def run_test():
     try:
@@ -148,7 +136,7 @@ def run_test():
 def home():
     return "Pariksha Executor is LIVE!", 200
 
-# --- NEW: DISCOVERY SCAN ROUTE (WITH DEBUGGING) ---
+# --- DISCOVERY SCAN ROUTE ---
 @app.route('/scan', methods=['POST'])
 def scan():
     try:
@@ -158,7 +146,6 @@ def scan():
         async def perform_scan(target_url):
             async with async_playwright() as p:
                 browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
-                # Added user_agent to help bypass Cloudflare/Bot protection
                 context = await browser.new_context(
                     viewport={'width': 1280, 'height': 720},
                     user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
@@ -166,24 +153,21 @@ def scan():
                 page = await context.new_page()
                 await apply_playwright_stealth(page)
                 
-                # 1. Navigate and wait for the basic structure
                 await page.goto(target_url, wait_until="domcontentloaded")
                 
-                # 2. THE FIX: Wait 5 seconds for React/Shopify to pass bot checks and render the UI
+                # Wait 5 seconds for React/Shopify rendering
                 await page.wait_for_timeout(5000)
                 
-                # 3. DEBUG EYES: Take a picture of what the bot is actually seeing
+                # Take debug screenshot
                 screenshot_bytes = await page.screenshot(full_page=False)
                 debug_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
                 
-                # 4. THE DNA CAPTURE
-                # This captures the 'Accessibility Tree' in a YAML format for the AI
+                # Capture DNA
                 dna_map = await page.aria_snapshot()
                 
                 await browser.close()
                 return dna_map, debug_base64
 
-        # Execute the scan
         dna_result, debug_screenshot = asyncio.run(perform_scan(url))
         
         return jsonify({
