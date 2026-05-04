@@ -4,3 +4,4 @@ playwright-stealth
 selenium
 selenium-stealth
 gunicorn
+flask-cors
