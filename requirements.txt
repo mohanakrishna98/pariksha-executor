@@ -6,4 +6,4 @@ gunicorn
 requests
 openai
 anthropic
-google-generativeai
+google-genai
