@@ -1,7 +1,9 @@
 flask
+flask-cors
 playwright
 playwright-stealth
-selenium
-selenium-stealth
 gunicorn
-flask-cors
+requests
+openai
+anthropic
+google-generativeai
