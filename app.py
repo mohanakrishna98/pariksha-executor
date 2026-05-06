@@ -12,7 +12,8 @@ import concurrent.futures
 # --- AI SDKs ---
 from openai import OpenAI
 import anthropic
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -53,19 +54,18 @@ def analyze_ui_ux_with_ai(base64_image, provider_choice="openai"):
             return response.content[0].text
 
         elif provider_choice == "gemini":
-            genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-            model = genai.GenerativeModel('gemini-1.5-pro')
+            # Using the new google.genai SDK
+            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
             image_bytes = base64.b64decode(base64_image)
-            image_part = {"mime_type": "image/png", "data": image_bytes}
             
-            response = model.generate_content([prompt, image_part])
+            response = client.models.generate_content(
+                model='gemini-1.5-pro',
+                contents=[
+                    prompt,
+                    types.Part.from_bytes(data=image_bytes, mime_type='image/png')
+                ]
+            )
             return response.text
-
-        else:
-            return "ERROR: Unsupported AI Provider selected."
-
-    except Exception as e:
-        return f"Vision API Error ({provider_choice}): {str(e)}"
 
 # --- HELPER: Safe Stealth Injection ---
 async def apply_playwright_stealth(page):
