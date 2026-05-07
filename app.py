@@ -67,6 +67,13 @@ def analyze_ui_ux_with_ai(base64_image, provider_choice="openai"):
             )
             return response.text
 
+        else:
+            return "ERROR: Unsupported AI Provider selected."
+
+    # THIS IS THE BLOCK THAT WAS MISSING!
+    except Exception as e:
+        return f"Vision API Error ({provider_choice}): {str(e)}"
+
 # --- HELPER: Safe Stealth Injection ---
 async def apply_playwright_stealth(page):
     try:
