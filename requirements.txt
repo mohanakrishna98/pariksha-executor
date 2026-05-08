@@ -1,9 +1,18 @@
-flask
-flask-cors
+# Web framework (async Flask drop-in)
+quart
+quart-cors
+
+# Browser automation
 playwright
 playwright-stealth
-gunicorn
-requests
+
+# WSGI/ASGI server
+hypercorn
+
+# HTTP client (async-native, replaces sync `requests`)
+httpx
+
+# AI providers
 openai
 anthropic
 google-genai
