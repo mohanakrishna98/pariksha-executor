@@ -1,19 +1,16 @@
-# Updated to the version required by the error message
-FROM mcr.microsoft.com/playwright/python:v1.59.0-jammy
+# Official Playwright image — includes all browser binaries
+FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
 
-# 1. Install standard Google Chrome (so Selenium still works)
-RUN apt-get update && apt-get install -y wget gnupg \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list' \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable
-
-# 2. Setup App
+# Setup app
 WORKDIR /app
 COPY . .
 
-# 3. Install Python Dependencies
-RUN pip install -r requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. Run App
-CMD ["gunicorn", "--timeout", "180", "-b", "0.0.0.0:10000", "app:app"]
+# Expose port
+EXPOSE 10000
+
+# Use Hypercorn (ASGI server) to run the Quart app
+# --workers 2 is conservative; tune to your instance size
+CMD ["hypercorn", "--bind", "0.0.0.0:10000", "--workers", "2", "--timeout", "180", "app:app"]
