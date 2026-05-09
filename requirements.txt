@@ -15,4 +15,4 @@ httpx
 # AI providers
 openai
 anthropic
-google-generativeai
+google-genai
