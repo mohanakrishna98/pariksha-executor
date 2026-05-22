@@ -3,7 +3,7 @@ quart
 quart-cors
 
 # Browser automation
-playwright
+playwright==1.44.0
 playwright-stealth
 
 # WSGI/ASGI server
